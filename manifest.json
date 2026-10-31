@@ -1,0 +1,13 @@
+{
+  "name": "Vinho Vida",
+  "short_name": "Vinho Vida",
+  "description": "Gestão da garrafeira: inventário, janelas de consumo, harmonizações e notas de prova.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#faf6f1",
+  "theme_color": "#5b1a2b",
+  "lang": "pt-PT",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Vinho Vida</title>
+  <meta name="theme-color" content="#5b1a2b">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topo">
+    <h1>Vinho Vida</h1>
+    <button id="btn-novo" class="btn primario">+ Garrafa</button>
+  </header>
+
+  <nav class="separadores" role="tablist">
+    <button data-tab="painel" class="ativo">Painel</button>
+    <button data-tab="garrafeira">Garrafeira</button>
+    <button data-tab="harmonizar">Harmonizar</button>
+    <button data-tab="historico">Histórico</button>
+    <button data-tab="dados">Dados</button>
+  </nav>
+
+  <main>
+    <!-- PAINEL -->
+    <section id="tab-painel" class="tab ativo">
+      <div class="cartoes" id="resumo"></div>
+      <h2>Beber este ano</h2>
+      <p class="ajuda">Garrafas no último ano da janela ou que já passaram. São estas que se perdem.</p>
+      <div id="lista-urgente" class="lista"></div>
+      <h2>No ponto</h2>
+      <div id="lista-pronto" class="lista"></div>
+    </section>
+
+    <!-- GARRAFEIRA -->
+    <section id="tab-garrafeira" class="tab">
+      <div class="filtros">
+        <input id="f-texto" type="search" placeholder="Procurar nome, produtor, casta, região...">
+        <select id="f-tipo"><option value="">Todos os tipos</option></select>
+        <select id="f-estado">
+          <option value="">Qualquer estado</option>
+          <option value="cedo">Ainda cedo</option>
+          <option value="pronto">No ponto</option>
+          <option value="ultimo">Último ano</option>
+          <option value="passou">Passou a janela</option>
+          <option value="sem">Sem janela</option>
+        </select>
+        <select id="f-ordem">
+          <option value="urgencia">Ordenar por urgência</option>
+          <option value="nome">Nome</option>
+          <option value="ano">Colheita</option>
+          <option value="valor">Valor</option>
+          <option value="local">Localização</option>
+        </select>
+        <label class="check"><input id="f-stock" type="checkbox" checked> Só com stock</label>
+      </div>
+      <div id="lista-garrafeira" class="lista"></div>
+    </section>
+
+    <!-- HARMONIZAR -->
+    <section id="tab-harmonizar" class="tab">
+      <h2>O que vamos comer?</h2>
+      <div id="pratos" class="pratos"></div>
+      <div id="sugestoes" class="lista"></div>
+    </section>
+
+    <!-- HISTÓRICO -->
+    <section id="tab-historico" class="tab">
+      <h2>Garrafas abertas</h2>
+      <div id="lista-historico" class="lista"></div>
+    </section>
+
+    <!-- DADOS -->
+    <section id="tab-dados" class="tab">
+      <h2>Importar</h2>
+      <p class="ajuda">Exportações CSV do Vivino, do Oeni ou de uma folha de cálculo. Os duplicados (mesmo produtor, nome e colheita) são juntos, não repetidos.</p>
+      <input id="in-csv" type="file" accept=".csv,text/csv">
+      <h2>Cópia de segurança</h2>
+      <p class="ajuda">Os dados ficam só neste aparelho. Faz uma cópia regularmente e guarda-a noutro sítio.</p>
+      <div class="botoes">
+        <button id="btn-backup" class="btn">Exportar cópia (JSON)</button>
+        <label class="btn">Restaurar cópia<input id="in-backup" type="file" accept=".json,application/json" hidden></label>
+        <button id="btn-csv" class="btn">Exportar CSV</button>
+      </div>
+      <h2>Relatório da garrafeira</h2>
+      <p class="ajuda">Inventário completo por localização, com valores. Para a família e para o seguro.</p>
+      <button id="btn-relatorio" class="btn">Imprimir / guardar PDF</button>
+      <h2>Zona perigosa</h2>
+      <button id="btn-apagar-tudo" class="btn perigo">Apagar todos os dados</button>
+      <p id="estado-armazenamento" class="ajuda"></p>
+    </section>
+  </main>
+
+  <!-- FORMULÁRIO -->
+  <dialog id="dlg-vinho">
+    <form id="form-vinho" method="dialog">
+      <h2 id="form-titulo">Nova garrafa</h2>
+      <input type="hidden" name="id">
+      <fieldset>
+        <legend>Identificação</legend>
+        <label>Nome<input name="nome" required></label>
+        <label>Produtor<input name="produtor"></label>
+        <div class="linha">
+          <label>Colheita<input name="ano" type="number" min="1800" max="2100" placeholder="NV"></label>
+          <label>Tipo<select name="tipo"></select></label>
+        </div>
+        <div class="linha">
+          <label>Região<input name="regiao"></label>
+          <label>País<input name="pais"></label>
+        </div>
+        <label>Castas<input name="castas" placeholder="Touriga Nacional, Tinta Roriz"></label>
+      </fieldset>
+      <fieldset>
+        <legend>Garrafeira</legend>
+        <div class="linha">
+          <label>Quantidade<input name="quantidade" type="number" min="0" value="1"></label>
+          <label>Formato<select name="formato">
+            <option value="75">75 cl</option><option value="37.5">37,5 cl</option>
+            <option value="150">Magnum 1,5 L</option><option value="300">3 L</option><option value="50">50 cl</option>
+          </select></label>
+        </div>
+        <label>Localização<input name="local" placeholder="Garrafeira A, prateleira 3, posição 5"></label>
+        <div class="linha">
+          <label>Preço de compra (€)<input name="precoCompra" type="number" min="0" step="0.01"></label>
+          <label>Valor atual (€)<input name="valorAtual" type="number" min="0" step="0.01"></label>
+        </div>
+        <div class="linha">
+          <label>Beber a partir de<input name="beberDe" type="number" min="1800" max="2200"></label>
+          <label>Beber até<input name="beberAte" type="number" min="1800" max="2200"></label>
+        </div>
+        <button type="button" id="btn-sugerir-janela" class="btn pequeno">Sugerir janela</button>
+      </fieldset>
+      <fieldset>
+        <legend>Perfil e prova</legend>
+        <div class="linha">
+          <label>Corpo<select name="corpo"></select></label>
+          <label>Taninos<select name="taninos"></select></label>
+        </div>
+        <div class="linha">
+          <label>Acidez<select name="acidez"></select></label>
+          <label>Doçura<select name="docura"></select></label>
+        </div>
+        <label>Pontuação (0 a 5)<input name="pontuacao" type="number" min="0" max="5" step="0.1"></label>
+        <label>Aromas<input name="aromas" placeholder="Fruta preta, especiaria, couro"></label>
+        <label>Harmonizações<input name="harmonizacao" placeholder="Cabrito assado, queijo da Serra"></label>
+        <label>Notas<textarea name="notas" rows="3"></textarea></label>
+      </fieldset>
+      <div class="acoes">
+        <button type="button" id="btn-apagar" class="btn perigo">Apagar</button>
+        <span class="espaco"></span>
+        <button type="button" id="btn-cancelar" class="btn">Cancelar</button>
+        <button type="submit" class="btn primario">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ABRIR GARRAFA -->
+  <dialog id="dlg-abrir">
+    <form id="form-abrir" method="dialog">
+      <h2>Abrir garrafa</h2>
+      <p id="abrir-nome"></p>
+      <input type="hidden" name="id">
+      <label>Data<input name="data" type="date" required></label>
+      <label>Ocasião<input name="ocasiao" placeholder="Jantar de aniversário"></label>
+      <label>Com quem<input name="companhia"></label>
+      <label>Prato<input name="prato"></label>
+      <label>Nota (0 a 5)<input name="nota" type="number" min="0" max="5" step="0.1"></label>
+      <label>Comentário<textarea name="comentario" rows="3"></textarea></label>
+      <div class="acoes">
+        <span class="espaco"></span>
+        <button type="button" id="btn-abrir-cancelar" class="btn">Cancelar</button>
+        <button type="submit" class="btn primario">Registar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="relatorio" class="so-impressao"></div>
+  <div id="aviso" class="aviso" role="status"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

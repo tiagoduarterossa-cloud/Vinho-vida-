@@ -41,10 +41,22 @@ const PRATOS = [
   { id: 'aperitivo', nome: 'Aperitivo, entradas', tipos: { espumante: 3, branco: 2, rose: 2 }, corpo: [1, 3] }
 ];
 
+/* ---------- Nuvem (Supabase) ---------- */
+
+const CFG = window.VINHO_CONFIG || {};
+const NUVEM = !!(CFG.supabaseUrl && CFG.supabaseAnonKey && window.supabase);
+const sb = NUVEM ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey) : null;
+const BUCKET = 'rotulos';
+let utilizador = null;
+let sincronizado = new Map();   // id -> { json, foto } tal como está na nuvem
+let filaSync = Promise.resolve();
+const urlsFotos = new Map();    // caminho -> URL assinado
+
 /* ---------- Estado e armazenamento ---------- */
 
-let dados = carregar();
+let dados = NUVEM ? { versao: 1, vinhos: [] } : carregar();
 let pratoAtivo = null;
+let fotoPendente = null;        // { blob, dataUrl } | 'remover' | null
 
 function carregar() {
   try {
@@ -58,16 +70,84 @@ function carregar() {
 }
 
 function guardar() {
-  try {
-    localStorage.setItem(CHAVE, JSON.stringify(dados));
-  } catch (e) {
-    aviso('Não foi possível guardar. Exporta uma cópia de segurança já.');
+  if (NUVEM) {
+    if (utilizador) sincronizar();
+  } else {
+    try {
+      localStorage.setItem(CHAVE, JSON.stringify(dados));
+    } catch (e) {
+      aviso('Não foi possível guardar. Exporta uma cópia de segurança já.');
+    }
   }
   render();
 }
 
 function novoId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
+const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function garantirUUIDs(vinhos) {
+  vinhos.forEach(v => { if (!RE_UUID.test(v.id || '')) v.id = novoId(); });
+  return vinhos;
+}
+
+function semId(v) {
+  const { id, ...resto } = v;
+  return resto;
+}
+
+// Compara o estado local com o último estado enviado e manda só as diferenças.
+function sincronizar() {
+  filaSync = filaSync.then(async () => {
+    const atuais = new Map(dados.vinhos.map(v => [v.id, JSON.stringify(semId(v))]));
+    const alterados = dados.vinhos.filter(v => sincronizado.get(v.id)?.json !== atuais.get(v.id));
+    const apagados = [...sincronizado.keys()].filter(id => !atuais.has(id));
+    try {
+      if (alterados.length) {
+        const agora = new Date().toISOString();
+        const { error } = await sb.from('vinhos').upsert(alterados.map(v => ({
+          id: v.id, user_id: utilizador.id, dados: semId(v), atualizado_em: agora
+        })));
+        if (error) throw error;
+        alterados.forEach(v => sincronizado.set(v.id, { json: atuais.get(v.id), foto: v.foto }));
+      }
+      if (apagados.length) {
+        const fotos = apagados.map(id => sincronizado.get(id).foto).filter(Boolean);
+        const { error } = await sb.from('vinhos').delete().in('id', apagados);
+        if (error) throw error;
+        if (fotos.length) await sb.storage.from(BUCKET).remove(fotos);
+        apagados.forEach(id => sincronizado.delete(id));
+      }
+    } catch (e) {
+      console.error(e);
+      aviso('Falha a sincronizar. Tenta de novo quando houver rede.');
+    }
+  });
+  return filaSync;
+}
+
+async function carregarNuvem() {
+  const { data, error } = await sb.from('vinhos').select('id, dados').order('criado_em');
+  if (error) { aviso('Erro a carregar a garrafeira: ' + error.message); return; }
+  dados = { versao: 1, vinhos: data.map(r => ({ ...r.dados, id: r.id })) };
+  sincronizado = new Map(data.map(r => [r.id, { json: JSON.stringify(r.dados), foto: r.dados.foto }]));
+  render();
+
+  // Primeira entrada: oferecer trazer o que estava guardado só neste aparelho.
+  const local = carregar();
+  if (!data.length && local.vinhos.length &&
+      confirm(`Este aparelho tem ${local.vinhos.length} vinhos guardados sem conta. Passá-los para a tua conta?`)) {
+    dados.vinhos = garantirUUIDs(local.vinhos.map(v => ({ ...v, foto: null })));
+    await sincronizar();
+    try { localStorage.removeItem(CHAVE); } catch (e) { /* irrelevante */ }
+    render();
+    aviso('Garrafeira transferida para a conta.');
+  }
 }
 
 /* ---------- Utilitários ---------- */
@@ -181,12 +261,15 @@ function cartaoVinho(v, extra = '') {
   return `
     <article class="vinho">
       <div class="cor" style="background:${tipo.cor}"></div>
-      <div>
+      <div class="corpo-vinho">
+        ${v.foto ? `<img class="miniatura" alt="" data-foto="${esc(v.foto)}" src="${esc(srcFoto(v.foto))}">` : ''}
+        <div>
         <div class="titulo">${esc(v.nome)} ${v.ano ? esc(v.ano) : 'NV'}
           <span class="etiqueta e-${e}">${ESTADOS[e]}</span>
         </div>
         <div class="meta">${v.produtor ? esc(v.produtor) + ' · ' : ''}${meta}</div>
         <div class="meta">${v.quantidade} garrafa${v.quantidade === 1 ? '' : 's'}${v.pontuacao ? ' · ' + esc(v.pontuacao) + '/5' : ''}${valorUnitario(v) ? ' · ' + euros(valorUnitario(v)) : ''}${extra}</div>
+        </div>
       </div>
       <div class="botoes-vinho">
         ${v.quantidade > 0 ? `<button class="btn pequeno" data-abrir="${v.id}">Abrir</button>` : ''}
@@ -289,6 +372,112 @@ function render() {
   renderGarrafeira();
   renderHarmonizar();
   renderHistorico();
+  hidratarFotos();
+}
+
+/* ---------- Fotos ---------- */
+
+function srcFoto(foto) {
+  if (!foto) return '';
+  if (foto.startsWith('data:')) return foto;
+  return urlsFotos.get(foto) || '';
+}
+
+// Na nuvem as fotos são privadas: pedem-se URLs assinados em lote.
+async function hidratarFotos() {
+  if (!NUVEM || !utilizador) return;
+  const faltam = [...new Set($$('img[data-foto]').map(i => i.dataset.foto))]
+    .filter(p => p && !p.startsWith('data:') && !urlsFotos.has(p));
+  if (faltam.length) {
+    const { data, error } = await sb.storage.from(BUCKET).createSignedUrls(faltam, 60 * 60 * 6);
+    if (error) return;
+    data.forEach(d => { if (d.signedUrl) urlsFotos.set(d.path, d.signedUrl); });
+  }
+  $$('img[data-foto]').forEach(i => { const u = urlsFotos.get(i.dataset.foto); if (u && i.src !== u) i.src = u; });
+}
+
+async function redimensionar(ficheiro, max, qualidade) {
+  const img = await createImageBitmap(ficheiro);
+  const escala = Math.min(1, max / Math.max(img.width, img.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(img.width * escala);
+  c.height = Math.round(img.height * escala);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  const dataUrl = c.toDataURL('image/jpeg', qualidade);
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', qualidade));
+  return { blob, dataUrl };
+}
+
+function mostrarPreview(src) {
+  const img = $('#form-foto-preview');
+  img.src = src || '';
+  img.hidden = !src;
+  $('#btn-remover-foto').hidden = !src;
+}
+
+async function escolherFoto(ficheiro) {
+  // Sem nuvem a foto vai para o localStorage, por isso fica pequena.
+  fotoPendente = await redimensionar(ficheiro, NUVEM ? 1600 : 500, NUVEM ? 0.85 : 0.7);
+  mostrarPreview(fotoPendente.dataUrl);
+  return fotoPendente;
+}
+
+async function aplicarFoto(v) {
+  if (!fotoPendente) return;
+  if (fotoPendente === 'remover') {
+    if (NUVEM && v.foto && !v.foto.startsWith('data:')) await sb.storage.from(BUCKET).remove([v.foto]);
+    v.foto = null;
+  } else if (NUVEM) {
+    const caminho = `${utilizador.id}/${v.id}-${Date.now()}.jpg`;
+    const { error } = await sb.storage.from(BUCKET).upload(caminho, fotoPendente.blob, { contentType: 'image/jpeg' });
+    if (error) { aviso('A foto não foi enviada: ' + error.message); return; }
+    if (v.foto && !v.foto.startsWith('data:')) sb.storage.from(BUCKET).remove([v.foto]);
+    urlsFotos.set(caminho, fotoPendente.dataUrl);
+    v.foto = caminho;
+  } else {
+    v.foto = fotoPendente.dataUrl;
+  }
+  fotoPendente = null;
+}
+
+/* ---------- Digitalização do rótulo ---------- */
+
+const CAMPOS_ROTULO = ['nome', 'produtor', 'ano', 'tipo', 'regiao', 'pais', 'castas', 'corpo', 'taninos',
+  'acidez', 'docura', 'aromas', 'harmonizacao', 'beberDe', 'beberAte', 'notas'];
+
+async function digitalizar(ficheiro) {
+  const btn = $('#btn-digitalizar');
+  if (!NUVEM || !utilizador) {
+    await escolherFoto(ficheiro);
+    aviso('Foto guardada. A leitura automática do rótulo precisa de sessão iniciada.');
+    return;
+  }
+  btn.classList.add('ocupado');
+  btn.querySelector('span').textContent = 'A ler o rótulo...';
+  try {
+    const f = await escolherFoto(ficheiro);
+    const { data, error } = await sb.functions.invoke('ler-rotulo', {
+      body: { imagem: f.dataUrl.split(',')[1] }
+    });
+    if (error) throw error;
+    if (!data || data.erro) throw new Error(data?.erro || 'sem resposta');
+    if (data.legivel === false) { aviso('Não consegui ler o rótulo. Tenta com mais luz e de frente.'); return; }
+    const form = $('#form-vinho');
+    let n = 0;
+    CAMPOS_ROTULO.forEach(c => {
+      const val = data[c];
+      if (val === null || val === undefined || val === '') return;
+      form.elements[c].value = val;
+      n++;
+    });
+    aviso(`${n} campos preenchidos. Confirma tudo antes de guardar.`);
+  } catch (e) {
+    console.error(e);
+    aviso('Falhou a leitura do rótulo: ' + (e.message || e));
+  } finally {
+    btn.classList.remove('ocupado');
+    btn.querySelector('span').textContent = 'Digitalizar rótulo';
+  }
 }
 
 /* ---------- Formulário ---------- */
@@ -315,6 +504,8 @@ function abrirForm(id) {
   form.reset();
   const v = id ? dados.vinhos.find(x => x.id === id) : null;
   $('#form-titulo').textContent = v ? 'Editar garrafa' : 'Nova garrafa';
+  fotoPendente = null;
+  mostrarPreview(v ? srcFoto(v.foto) : '');
   $('#btn-apagar').style.display = v ? '' : 'none';
   if (v) {
     for (const el of form.elements) {
@@ -326,7 +517,7 @@ function abrirForm(id) {
   $('#dlg-vinho').showModal();
 }
 
-function guardarForm(e) {
+async function guardarForm(e) {
   e.preventDefault();
   const v = lerForm(e.target);
   if (!v.nome) return;
@@ -335,16 +526,26 @@ function guardarForm(e) {
     aviso('A janela está invertida: "beber a partir de" é posterior a "beber até".');
     return;
   }
-  const existente = v.id && dados.vinhos.find(x => x.id === v.id);
-  if (existente) {
-    Object.assign(existente, v);
-  } else {
-    const dup = dados.vinhos.find(x => chaveDuplicado(x) === chaveDuplicado(v));
-    if (dup && confirm(`Já existe "${dup.nome} ${dup.ano || 'NV'}". Somar ${v.quantidade} garrafa(s) a essa entrada?`)) {
-      dup.quantidade += v.quantidade;
+  const btn = e.target.querySelector('button[type=submit]');
+  btn.disabled = true;
+  try {
+    const existente = v.id && dados.vinhos.find(x => x.id === v.id);
+    if (existente) {
+      Object.assign(existente, v);
+      await aplicarFoto(existente);
     } else {
-      dados.vinhos.push({ ...v, id: novoId(), criadoEm: hojeISO(), historico: [] });
+      const dup = dados.vinhos.find(x => chaveDuplicado(x) === chaveDuplicado(v));
+      if (dup && confirm(`Já existe "${dup.nome} ${dup.ano || 'NV'}". Somar ${v.quantidade} garrafa(s) a essa entrada?`)) {
+        dup.quantidade += v.quantidade;
+        if (!dup.foto) await aplicarFoto(dup);
+      } else {
+        const novo = { ...v, id: novoId(), criadoEm: hojeISO(), historico: [] };
+        await aplicarFoto(novo);
+        dados.vinhos.push(novo);
+      }
     }
+  } finally {
+    btn.disabled = false;
   }
   $('#dlg-vinho').close();
   guardar();
@@ -562,6 +763,16 @@ function ligarEventos() {
     aviso('Estimativa genérica pelo tipo e corpo. Confirma com o produtor ou um crítico.');
   });
 
+  $('#in-foto').addEventListener('change', async e => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (f) await escolherFoto(f);
+  });
+  $('#in-digitalizar').addEventListener('change', async e => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (f) await digitalizar(f);
+  });
+  $('#btn-remover-foto').addEventListener('click', () => { fotoPendente = 'remover'; mostrarPreview(''); });
+
   $('#form-abrir').addEventListener('submit', registarAbertura);
   $('#btn-abrir-cancelar').addEventListener('click', () => $('#dlg-abrir').close());
 
@@ -590,7 +801,10 @@ function ligarEventos() {
     try {
       const d = JSON.parse(await f.text());
       if (!Array.isArray(d.vinhos)) throw new Error('formato');
-      if (confirm(`Substituir os dados atuais por ${d.vinhos.length} vinhos da cópia?`)) { dados = d; guardar(); aviso('Cópia restaurada.'); }
+      if (confirm(`Substituir os dados atuais por ${d.vinhos.length} vinhos da cópia?`)) {
+        if (NUVEM) garantirUUIDs(d.vinhos);
+        dados = d; guardar(); aviso('Cópia restaurada.');
+      }
     } catch (err) { aviso('Ficheiro de cópia inválido.'); }
   });
   $('#btn-csv').addEventListener('click', exportarCSV);
@@ -601,6 +815,116 @@ function ligarEventos() {
       guardar();
     }
   });
+}
+
+/* ---------- Sessão ---------- */
+
+const ERROS_AUTH = [
+  [/invalid login credentials/i, 'Email ou password errados.'],
+  [/email not confirmed/i, 'Ainda não confirmaste o email. Vê a caixa de correio (e o spam).'],
+  [/already registered|already been registered/i, 'Já existe uma conta com este email. Usa "Entrar" ou recupera a password.'],
+  [/password should be at least/i, 'A password tem de ter pelo menos 8 caracteres.'],
+  [/rate limit|too many/i, 'Demasiadas tentativas. Espera uns minutos.'],
+  [/network|fetch/i, 'Sem ligação ao servidor. Verifica a internet.']
+];
+function erroAuth(e) {
+  const m = e?.message || String(e);
+  for (const [re, txt] of ERROS_AUTH) if (re.test(m)) return txt;
+  return m;
+}
+
+function mostrarAuth(painel) {
+  document.body.classList.toggle('sem-sessao', !!painel);
+  $$('.painel-auth').forEach(p => { p.hidden = p.id !== 'form-' + painel; });
+  $$('.painel-auth .erro, .painel-auth .info').forEach(el => { el.textContent = ''; });
+}
+
+function urlRetorno() {
+  return location.origin + location.pathname;
+}
+
+function ligarAuth() {
+  $$('[data-ir]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); mostrarAuth(a.dataset.ir); }));
+
+  const tratar = (form, fn) => form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const erro = form.querySelector('.erro');
+    const btn = form.querySelector('button[type=submit]');
+    erro.textContent = '';
+    btn.disabled = true;
+    try { await fn(Object.fromEntries(new FormData(form))); }
+    catch (err) { erro.textContent = erroAuth(err); }
+    finally { btn.disabled = false; }
+  });
+
+  tratar($('#form-entrar'), async ({ email, password }) => {
+    const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
+    if (error) throw error;
+  });
+
+  tratar($('#form-registar'), async ({ email, password, password2 }) => {
+    if (password.length < 8) throw new Error('Password should be at least 8 characters');
+    if (password !== password2) throw new Error('As passwords não coincidem.');
+    const { data, error } = await sb.auth.signUp({
+      email: email.trim(), password, options: { emailRedirectTo: urlRetorno() }
+    });
+    if (error) throw error;
+    if (!data.session) {
+      mostrarAuth('entrar');
+      $('#form-entrar .info').textContent = 'Conta criada. Enviámos um email de confirmação. Confirma e depois entra.';
+    }
+  });
+
+  tratar($('#form-recuperar'), async ({ email }) => {
+    const { error } = await sb.auth.resetPasswordForEmail(email.trim(), { redirectTo: urlRetorno() });
+    if (error) throw error;
+    $('#form-recuperar .info').textContent = 'Se existir uma conta com este email, vais receber um link para definir uma nova password.';
+  });
+
+  tratar($('#form-nova-password'), async ({ password, password2 }) => {
+    if (password.length < 8) throw new Error('Password should be at least 8 characters');
+    if (password !== password2) throw new Error('As passwords não coincidem.');
+    const { error } = await sb.auth.updateUser({ password });
+    if (error) throw error;
+    history.replaceState(null, '', urlRetorno());
+    aviso('Password alterada.');
+    entrou((await sb.auth.getSession()).data.session);
+  });
+
+  $('#btn-sair').addEventListener('click', async () => {
+    await filaSync;
+    await sb.auth.signOut();
+  });
+}
+
+let sessaoAtual = null;
+async function entrou(sessao) {
+  if (!sessao) {
+    utilizador = null; sessaoAtual = null;
+    dados = { versao: 1, vinhos: [] };
+    sincronizado = new Map(); urlsFotos.clear();
+    mostrarAuth('entrar');
+    return;
+  }
+  if (sessaoAtual === sessao.user.id) return;
+  sessaoAtual = sessao.user.id;
+  utilizador = sessao.user;
+  $('#conta-email').textContent = utilizador.email;
+  mostrarAuth(null);
+  await carregarNuvem();
+}
+
+function iniciarAuth() {
+  $('#conta').hidden = false;
+  ligarAuth();
+  let emRecuperacao = /type=recovery/.test(location.hash);
+  sb.auth.onAuthStateChange((evento, sessao) => {
+    if (evento === 'PASSWORD_RECOVERY') { emRecuperacao = true; mostrarAuth('nova-password'); return; }
+    if (emRecuperacao && evento !== 'SIGNED_OUT') return;
+    // Não fazer chamadas ao Supabase dentro do callback: adiar.
+    setTimeout(() => entrou(sessao), 0);
+  });
+  if (emRecuperacao) mostrarAuth('nova-password');
 }
 
 /* ---------- Arranque ---------- */
@@ -622,7 +946,7 @@ try {
   const tab = localStorage.getItem(CHAVE + '.tab');
   if (tab) { const b = document.querySelector(`.separadores [data-tab="${tab}"]`); if (b) b.click(); }
 } catch (e) { /* sem acesso */ }
-render();
+if (NUVEM) iniciarAuth(); else render();
 pedirArmazenamentoPersistente();
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});

@@ -1,5 +1,5 @@
-const CACHE = 'vinhovida-v1';
-const FICHEIROS = ['./', './index.html', './styles.css', './app.js', './manifest.json', './icons/icon.svg'];
+const CACHE = 'vinhovida-v2';
+const FICHEIROS = ['./', './index.html', './styles.css', './app.js', './config.js', './manifest.json', './icons/icon.svg'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FICHEIROS)));

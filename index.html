@@ -24,6 +24,44 @@
     <button data-tab="dados">Dados</button>
   </nav>
 
+  <!-- SESSÃO -->
+  <section id="ecra-auth" class="ecra-auth">
+    <form id="form-entrar" class="painel-auth" hidden>
+      <h2>Entrar</h2>
+      <p class="info ajuda"></p>
+      <label>Email<input name="email" type="email" autocomplete="email" required></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+      <p class="erro" role="alert"></p>
+      <button type="submit" class="btn primario">Entrar</button>
+      <p class="links"><a href="#" data-ir="recuperar">Esqueci-me da password</a> · <a href="#" data-ir="registar">Criar conta</a></p>
+    </form>
+    <form id="form-registar" class="painel-auth" hidden>
+      <h2>Criar conta</h2>
+      <label>Email<input name="email" type="email" autocomplete="email" required></label>
+      <label>Password (mínimo 8 caracteres)<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+      <label>Repetir password<input name="password2" type="password" autocomplete="new-password" minlength="8" required></label>
+      <p class="erro" role="alert"></p>
+      <button type="submit" class="btn primario">Criar conta</button>
+      <p class="links"><a href="#" data-ir="entrar">Já tenho conta</a></p>
+    </form>
+    <form id="form-recuperar" class="painel-auth" hidden>
+      <h2>Recuperar password</h2>
+      <p class="ajuda">Indica o email da conta. Recebes um link para definir uma password nova.</p>
+      <p class="info ajuda"></p>
+      <label>Email<input name="email" type="email" autocomplete="email" required></label>
+      <p class="erro" role="alert"></p>
+      <button type="submit" class="btn primario">Enviar link</button>
+      <p class="links"><a href="#" data-ir="entrar">Voltar a entrar</a></p>
+    </form>
+    <form id="form-nova-password" class="painel-auth" hidden>
+      <h2>Nova password</h2>
+      <label>Password nova<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+      <label>Repetir password<input name="password2" type="password" autocomplete="new-password" minlength="8" required></label>
+      <p class="erro" role="alert"></p>
+      <button type="submit" class="btn primario">Guardar password</button>
+    </form>
+  </section>
+
   <main>
     <!-- PAINEL -->
     <section id="tab-painel" class="tab ativo">
@@ -75,6 +113,11 @@
 
     <!-- DADOS -->
     <section id="tab-dados" class="tab">
+      <div id="conta" class="conta" hidden>
+        <h2>Conta</h2>
+        <p class="ajuda">Sessão iniciada como <strong id="conta-email"></strong>. A garrafeira fica guardada na nuvem e aparece em qualquer aparelho onde entres.</p>
+        <button id="btn-sair" class="btn">Terminar sessão</button>
+      </div>
       <h2>Importar</h2>
       <p class="ajuda">Exportações CSV do Vivino, do Oeni ou de uma folha de cálculo. Os duplicados (mesmo produtor, nome e colheita) são juntos, não repetidos.</p>
       <input id="in-csv" type="file" accept=".csv,text/csv">
@@ -99,6 +142,18 @@
     <form id="form-vinho" method="dialog">
       <h2 id="form-titulo">Nova garrafa</h2>
       <input type="hidden" name="id">
+      <div class="digitalizar">
+        <label class="btn primario" id="btn-digitalizar"><span>Digitalizar rótulo</span><input id="in-digitalizar" type="file" accept="image/*" capture="environment" hidden></label>
+        <span class="ajuda">Tira uma foto ao rótulo e os campos são preenchidos automaticamente.</span>
+      </div>
+      <fieldset>
+        <legend>Foto</legend>
+        <img id="form-foto-preview" class="foto-preview" alt="Foto do rótulo" hidden>
+        <div class="botoes">
+          <label class="btn pequeno">Escolher foto<input id="in-foto" type="file" accept="image/*" hidden></label>
+          <button type="button" id="btn-remover-foto" class="btn pequeno" hidden>Remover foto</button>
+        </div>
+      </fieldset>
       <fieldset>
         <legend>Identificação</legend>
         <label>Nome<input name="nome" required></label>
@@ -180,6 +235,8 @@
   <div id="relatorio" class="so-impressao"></div>
   <div id="aviso" class="aviso" role="status"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

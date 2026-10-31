@@ -48,6 +48,8 @@ const NUVEM = !!(CFG.supabaseUrl && CFG.supabaseAnonKey && window.supabase);
 const sb = NUVEM ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey) : null;
 const BUCKET = 'rotulos';
 let utilizador = null;
+let modo = NUVEM ? 'supabase' : 'local';   // 'local' | 'supabase' | 'claude'
+let cdb = null, cuid = null;               // base de dados da conta claude.ai
 let sincronizado = new Map();   // id -> { json, foto } tal como está na nuvem
 let filaSync = Promise.resolve();
 const urlsFotos = new Map();    // caminho -> URL assinado
@@ -70,8 +72,10 @@ function carregar() {
 }
 
 function guardar() {
-  if (NUVEM) {
+  if (modo === 'supabase') {
     if (utilizador) sincronizar();
+  } else if (modo === 'claude') {
+    sincronizarClaude();
   } else {
     try {
       localStorage.setItem(CHAVE, JSON.stringify(dados));
@@ -129,6 +133,83 @@ function sincronizar() {
     }
   });
   return filaSync;
+}
+
+/* ---------- Conta claude.ai (link do artifact) ---------- */
+
+function sincronizarClaude() {
+  filaSync = filaSync.then(async () => {
+    const col = cdb.collection('data/users/' + cuid);
+    const atuais = new Map(dados.vinhos.map(v => [v.id, JSON.stringify(semId(v))]));
+    try {
+      for (const v of dados.vinhos) {
+        if (sincronizado.get(v.id)?.json === atuais.get(v.id)) continue;
+        await col.doc(v.id).set(semId(v));   // um documento de cada vez
+        sincronizado.set(v.id, { json: atuais.get(v.id) });
+      }
+      for (const id of [...sincronizado.keys()]) {
+        if (atuais.has(id)) continue;
+        await col.doc(id).delete();
+        sincronizado.delete(id);
+      }
+    } catch (e) {
+      console.error(e);
+      if (e && e.code === 'invalid_argument') {
+        aviso('Sem permissão para guardar nesta conta. A guardar só neste aparelho.');
+        modo = 'local';
+        try { localStorage.setItem(CHAVE, JSON.stringify(dados)); } catch (x) { /* irrelevante */ }
+        mostrarConta();
+      } else if (e && e.code === 'quota_exceeded') {
+        aviso('A base de dados está cheia. Apaga fotos ou vinhos antigos.');
+      } else {
+        aviso('Falha a guardar na conta. Tenta de novo daqui a pouco.');
+      }
+    }
+  });
+  return filaSync;
+}
+
+async function iniciarClaude() {
+  if (!window.claude || !window.claude.use) return false;
+  const [db, user] = await Promise.all([window.claude.use('db'), window.claude.use('user')]);
+  if (!db || !user) return false;
+  const eu = await user.me();
+  if (!eu.id) return false;
+  try {
+    const snap = await db.collection('data/users/' + eu.id).get();
+    cdb = db; cuid = eu.id; modo = 'claude';
+    const vinhos = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+    sincronizado = new Map(vinhos.map(v => [v.id, { json: JSON.stringify(semId(v)) }]));
+    dados = { versao: 1, vinhos };
+    contaNome = eu.name || eu.email || '';
+    mostrarConta();
+    render();
+    const local = carregar();
+    if (!vinhos.length && local.vinhos.length &&
+        confirm(`Este aparelho tem ${local.vinhos.length} vinhos guardados só aqui. Passá-los para a tua conta?`)) {
+      dados.vinhos = garantirUUIDs(local.vinhos);
+      await sincronizarClaude();
+      if (modo === 'claude') { try { localStorage.removeItem(CHAVE); } catch (e) { /* irrelevante */ } }
+      render();
+      aviso('Garrafeira passada para a conta.');
+    }
+    return true;
+  } catch (e) {
+    console.error(e);
+    return false;
+  }
+}
+
+let contaNome = '';
+function mostrarConta() {
+  const el = $('#conta-claude');
+  if (!el) return;
+  el.hidden = modo !== 'claude' && modo !== 'local';
+  $('#conta-claude-texto').innerHTML = modo === 'claude'
+    ? `Sessão iniciada com a tua conta Claude${contaNome ? ' (<strong></strong>)' : ''}. A garrafeira fica guardada na conta e aparece em qualquer aparelho onde abras este link.`
+    : 'Os dados estão guardados só neste aparelho. Abre a app pelo link do claude.ai com a tua conta para os teres em todos os aparelhos.';
+  const forte = $('#conta-claude-texto strong');
+  if (forte) forte.textContent = contaNome;
 }
 
 async function carregarNuvem() {
@@ -385,7 +466,7 @@ function srcFoto(foto) {
 
 // Na nuvem as fotos são privadas: pedem-se URLs assinados em lote.
 async function hidratarFotos() {
-  if (!NUVEM || !utilizador) return;
+  if (modo !== 'supabase' || !utilizador) return;
   const faltam = [...new Set($$('img[data-foto]').map(i => i.dataset.foto))]
     .filter(p => p && !p.startsWith('data:') && !urlsFotos.has(p));
   if (faltam.length) {
@@ -415,9 +496,52 @@ function mostrarPreview(src) {
   $('#btn-remover-foto').hidden = !src;
 }
 
+// Lado maior e qualidade. Na conta claude.ai cada vinho é um documento de 256 KB no máximo.
+const TAMANHO_FOTO = { supabase: [1600, 0.85], claude: [720, 0.78], local: [500, 0.7] };
+
+// Recorta a garrafa da foto e põe-na num fundo limpo, com sombra, na cor do tipo de vinho.
+async function fotoEstudio(ficheiro, caixa, tipo) {
+  const img = await createImageBitmap(ficheiro);
+  let [x, y, w, h] = Array.isArray(caixa) && caixa.length === 4 ? caixa.map(Number) : [0, 0, 1, 1];
+  if (![x, y, w, h].every(Number.isFinite) || w < 0.05 || h < 0.05) [x, y, w, h] = [0, 0, 1, 1];
+  // Margem de 4% e limites da imagem
+  x = Math.max(0, x - 0.04); y = Math.max(0, y - 0.03);
+  w = Math.min(1 - x, w + 0.08); h = Math.min(1 - y, h + 0.06);
+  const sx = x * img.width, sy = y * img.height, sw = w * img.width, sh = h * img.height;
+  const [lado, qual] = TAMANHO_FOTO[modo];
+  const W = Math.round(lado * 0.8), H = lado;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const cor = (TIPOS[tipo] || TIPOS.outro).cor;
+  const fundo = g.createLinearGradient(0, 0, 0, H);
+  fundo.addColorStop(0, '#fbf7f2');
+  fundo.addColorStop(1, '#efe4d8');
+  g.fillStyle = fundo; g.fillRect(0, 0, W, H);
+  const luz = g.createRadialGradient(W / 2, H * 0.95, 10, W / 2, H * 0.95, W * 0.8);
+  luz.addColorStop(0, cor + '55'); luz.addColorStop(1, cor + '00');
+  g.fillStyle = luz; g.fillRect(0, 0, W, H);
+  const esc = Math.min((W * 0.82) / sw, (H * 0.86) / sh);
+  const dw = sw * esc, dh = sh * esc, dx = (W - dw) / 2, dy = (H - dh) / 2 + H * 0.02;
+  g.save();
+  g.shadowColor = 'rgba(40,10,20,.35)'; g.shadowBlur = 28; g.shadowOffsetY = 14;
+  const r = 18;
+  g.beginPath();
+  g.moveTo(dx + r, dy); g.arcTo(dx + dw, dy, dx + dw, dy + dh, r); g.arcTo(dx + dw, dy + dh, dx, dy + dh, r);
+  g.arcTo(dx, dy + dh, dx, dy, r); g.arcTo(dx, dy, dx + dw, dy, r); g.closePath();
+  g.fillStyle = '#fff'; g.fill();
+  g.restore();
+  g.save(); g.clip();
+  g.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+  g.restore();
+  const dataUrl = c.toDataURL('image/jpeg', qual);
+  const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', qual));
+  return { blob, dataUrl };
+}
+
 async function escolherFoto(ficheiro) {
   // Sem nuvem a foto vai para o localStorage, por isso fica pequena.
-  fotoPendente = await redimensionar(ficheiro, NUVEM ? 1600 : 500, NUVEM ? 0.85 : 0.7);
+  fotoPendente = await redimensionar(ficheiro, ...TAMANHO_FOTO[modo]);
   mostrarPreview(fotoPendente.dataUrl);
   return fotoPendente;
 }
@@ -425,9 +549,9 @@ async function escolherFoto(ficheiro) {
 async function aplicarFoto(v) {
   if (!fotoPendente) return;
   if (fotoPendente === 'remover') {
-    if (NUVEM && v.foto && !v.foto.startsWith('data:')) await sb.storage.from(BUCKET).remove([v.foto]);
+    if (modo === 'supabase' && v.foto && !v.foto.startsWith('data:')) await sb.storage.from(BUCKET).remove([v.foto]);
     v.foto = null;
-  } else if (NUVEM) {
+  } else if (modo === 'supabase') {
     const caminho = `${utilizador.id}/${v.id}-${Date.now()}.jpg`;
     const { error } = await sb.storage.from(BUCKET).upload(caminho, fotoPendente.blob, { contentType: 'image/jpeg' });
     if (error) { aviso('A foto não foi enviada: ' + error.message); return; }
@@ -448,7 +572,7 @@ const CAMPOS_ROTULO = ['nome', 'produtor', 'ano', 'tipo', 'regiao', 'pais', 'cas
 const PROMPT_ROTULO = `És um sommelier experiente. A imagem é a fotografia de um rótulo de vinho.
 Responde APENAS com um objeto JSON com exatamente estas chaves:
 
-{"legivel": true, "nome": "", "produtor": "", "ano": 2018, "tipo": "tinto", "regiao": "", "pais": "",
+{"legivel": true, "caixa": [0.3, 0.05, 0.4, 0.9], "nome": "", "produtor": "", "ano": 2018, "tipo": "tinto", "regiao": "", "pais": "",
  "castas": "", "alcool": 14, "corpo": 4, "taninos": 4, "acidez": 3, "docura": 1, "qualidadeColheita": 4,
  "aromas": "", "harmonizacao": "",
  "beberDe": 2022, "beberAte": 2032, "notas": ""}
@@ -466,11 +590,12 @@ Regras:
 - beberDe e beberAte: anos civis da janela de consumo ideal. Se não houver colheita (NV), conta a partir de ${ANO}.
 - notas: 1 ou 2 frases sobre o vinho e o produtor.
 - legivel: false só se a imagem não mostrar um rótulo de vinho.
+- caixa: retângulo que contém a garrafa inteira (ou, se a garrafa não estiver toda visível, o rótulo), em frações da imagem: [x, y, largura, altura], com x e y a partir do canto superior esquerdo, valores entre 0 e 1.
 - Escreve em português de Portugal.`;
 
 // Ordem: função na nuvem (se houver sessão), senão o Claude de quem está a ver a página (claude.ai).
 async function lerRotulo(f) {
-  if (NUVEM && utilizador) {
+  if (modo === 'supabase' && utilizador) {
     const { data, error } = await sb.functions.invoke('ler-rotulo', { body: { imagem: f.dataUrl.split(',')[1] } });
     if (error) throw error;
     if (!data || data.erro) throw new Error(data?.erro || 'sem resposta');
@@ -517,7 +642,7 @@ async function digitalizar(ficheiro) {
   try {
     const f = await escolherFoto(ficheiro);
     // Para a leitura usa-se sempre uma imagem com boa resolução, mesmo em modo local.
-    const leitura = NUVEM ? f : await redimensionar(ficheiro, 1568, 0.85);
+    const leitura = modo === 'supabase' ? f : await redimensionar(ficheiro, 1568, 0.85);
     const bruto = await lerRotulo(leitura);
     if (!bruto) {
       aviso('Foto guardada. A leitura automática não está disponível aqui: abre a app pelo link do claude.ai ou inicia sessão.');
@@ -525,6 +650,10 @@ async function digitalizar(ficheiro) {
     }
     const data = limparFicha(bruto);
     if (data.legivel === false) { aviso('Não consegui ler o rótulo. Tenta com mais luz e de frente.'); return; }
+    try {
+      fotoPendente = await fotoEstudio(ficheiro, data.caixa, data.tipo);
+      mostrarPreview(fotoPendente.dataUrl);
+    } catch (e) { console.warn('foto de estúdio falhou', e); }
     const form = $('#form-vinho');
     let n = 0;
     CAMPOS_ROTULO.forEach(c => {
@@ -1161,7 +1290,7 @@ function ligarEventos() {
       const d = JSON.parse(await f.text());
       if (!Array.isArray(d.vinhos)) throw new Error('formato');
       if (confirm(`Substituir os dados atuais por ${d.vinhos.length} vinhos da cópia?`)) {
-        if (NUVEM) garantirUUIDs(d.vinhos);
+        if (modo !== 'local') garantirUUIDs(d.vinhos);
         dados = d; guardar(); aviso('Cópia restaurada.');
       }
     } catch (err) { aviso('Ficheiro de cópia inválido.'); }
@@ -1173,6 +1302,37 @@ function ligarEventos() {
       dados = { versao: 1, vinhos: [] };
       guardar();
     }
+  });
+}
+
+/* ---------- Tema ---------- */
+
+const TEMAS = ['auto', 'claro', 'escuro'];
+const ICONE_TEMA = { auto: '◐', claro: '☀', escuro: '☾' };
+const NOME_TEMA = { auto: 'Tema automático', claro: 'Tema claro', escuro: 'Tema escuro' };
+
+function aplicarTema(t) {
+  const raiz = document.documentElement;
+  if (t === 'claro') raiz.setAttribute('data-theme', 'light');
+  else if (t === 'escuro') raiz.setAttribute('data-theme', 'dark');
+  else raiz.removeAttribute('data-theme');
+  const btn = $('#btn-tema');
+  btn.textContent = ICONE_TEMA[t];
+  btn.title = btn.ariaLabel = NOME_TEMA[t] + ' (tocar para mudar)';
+  const escuro = t === 'escuro' || (t === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.querySelector('meta[name=theme-color]').content = escuro ? '#17110f' : '#5b1a2b';
+}
+
+function ligarTema() {
+  let t = 'auto';
+  try { t = localStorage.getItem(CHAVE + '.tema') || 'auto'; } catch (e) { /* irrelevante */ }
+  if (!TEMAS.includes(t)) t = 'auto';
+  aplicarTema(t);
+  $('#btn-tema').addEventListener('click', () => {
+    t = TEMAS[(TEMAS.indexOf(t) + 1) % TEMAS.length];
+    aplicarTema(t);
+    try { localStorage.setItem(CHAVE + '.tema', t); } catch (e) { /* irrelevante */ }
+    aviso(NOME_TEMA[t]);
   });
 }
 
@@ -1305,7 +1465,17 @@ try {
   const tab = localStorage.getItem(CHAVE + '.tab');
   if (tab) { const b = document.querySelector(`.separadores [data-tab="${tab}"]`); if (b) b.click(); }
 } catch (e) { /* sem acesso */ }
-if (NUVEM) iniciarAuth(); else render();
+ligarTema();
+if (NUVEM) {
+  iniciarAuth();
+} else {
+  render();
+  mostrarConta();
+  if (window.claude) {
+    $('#conta-claude-texto').textContent = 'A ligar à tua conta...';
+    iniciarClaude().then(ok => { if (!ok) mostrarConta(); });
+  }
+}
 pedirArmazenamentoPersistente();
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});

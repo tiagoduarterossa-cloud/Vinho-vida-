@@ -20,6 +20,7 @@ const SCHEMA = {
   additionalProperties: false,
   properties: {
     legivel: { type: "boolean", description: "false se a imagem não mostrar um rótulo de vinho legível" },
+    caixa: { type: ["array", "null"], items: { type: "number" }, description: "[x, y, largura, altura] da garrafa em frações da imagem" },
     nome: nulo("string"),
     produtor: nulo("string"),
     ano: nulo("integer"),
@@ -40,7 +41,7 @@ const SCHEMA = {
     notas: nulo("string"),
   },
   required: [
-    "legivel", "nome", "produtor", "ano", "tipo", "regiao", "pais", "castas", "alcool", "corpo", "taninos",
+    "legivel", "caixa", "nome", "produtor", "ano", "tipo", "regiao", "pais", "castas", "alcool", "corpo", "taninos",
     "acidez", "docura", "qualidadeColheita", "aromas", "harmonizacao", "beberDe", "beberAte", "notas",
   ],
 };
@@ -58,6 +59,7 @@ Regras:
 - beberDe e beberAte: anos civis da janela de consumo ideal. Sem colheita (NV), conta a partir do ano atual.
 - notas: 1 ou 2 frases sobre o vinho e o produtor.
 - legivel: false só se a imagem não mostrar um rótulo de vinho.
+- caixa: retângulo que contém a garrafa inteira (ou o rótulo, se a garrafa não estiver toda visível), em frações da imagem: [x, y, largura, altura], a partir do canto superior esquerdo.
 - Escreve em português de Portugal.`;
 
 const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });

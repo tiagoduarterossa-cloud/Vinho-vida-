@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Vinho Vida</title>
+  <title>Vinho é Vida</title>
   <meta name="theme-color" content="#5b1a2b">
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
@@ -12,8 +12,11 @@
 </head>
 <body>
   <header class="topo">
-    <h1>Vinho Vida</h1>
-    <button id="btn-novo" class="btn primario">+ Garrafa</button>
+    <h1>Vinho é Vida</h1>
+    <div class="topo-acoes">
+      <button id="btn-tema" class="btn-tema" type="button" aria-label="Mudar tema">◐</button>
+      <button id="btn-novo" class="btn primario">+ Garrafa</button>
+    </div>
   </header>
 
   <nav class="separadores" role="tablist">
@@ -113,6 +116,10 @@
 
     <!-- DADOS -->
     <section id="tab-dados" class="tab">
+      <div id="conta-claude" class="conta" hidden>
+        <h2>Conta</h2>
+        <p id="conta-claude-texto" class="ajuda"></p>
+      </div>
       <div id="conta" class="conta" hidden>
         <h2>Conta</h2>
         <p class="ajuda">Sessão iniciada como <strong id="conta-email"></strong>. A garrafeira fica guardada na nuvem e aparece em qualquer aparelho onde entres.</p>

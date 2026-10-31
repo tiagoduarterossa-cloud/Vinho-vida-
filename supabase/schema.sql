@@ -1,4 +1,4 @@
--- Vinho Vida: esquema da base de dados.
+-- Vinho é Vida: esquema da base de dados.
 -- Correr uma vez no Supabase, em SQL Editor > New query.
 
 -- Cada linha é um vinho de um utilizador. As características ficam em "dados" (JSON),

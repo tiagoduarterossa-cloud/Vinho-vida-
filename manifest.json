@@ -1,6 +1,6 @@
 {
-  "name": "Vinho Vida",
-  "short_name": "Vinho Vida",
+  "name": "Vinho é Vida",
+  "short_name": "Vinho é Vida",
   "description": "Gestão da garrafeira: inventário, janelas de consumo, harmonizações e notas de prova.",
   "start_url": "./index.html",
   "display": "standalone",

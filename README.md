@@ -1,4 +1,4 @@
-# Vinho Vida
+# Vinho é Vida
 
 Gestão de uma garrafeira pessoal. Funciona no telemóvel e no computador, sem internet, sem conta e sem servidor.
 

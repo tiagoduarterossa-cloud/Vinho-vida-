@@ -27,10 +27,12 @@ const SCHEMA = {
     regiao: nulo("string"),
     pais: nulo("string"),
     castas: nulo("string"),
+    alcool: nulo("number"),
     corpo: escala,
     taninos: escala,
     acidez: escala,
     docura: escala,
+    qualidadeColheita: escala,
     aromas: nulo("string"),
     harmonizacao: nulo("string"),
     beberDe: nulo("integer"),
@@ -38,8 +40,8 @@ const SCHEMA = {
     notas: nulo("string"),
   },
   required: [
-    "legivel", "nome", "produtor", "ano", "tipo", "regiao", "pais", "castas", "corpo", "taninos",
-    "acidez", "docura", "aromas", "harmonizacao", "beberDe", "beberAte", "notas",
+    "legivel", "nome", "produtor", "ano", "tipo", "regiao", "pais", "castas", "alcool", "corpo", "taninos",
+    "acidez", "docura", "qualidadeColheita", "aromas", "harmonizacao", "beberDe", "beberAte", "notas",
   ],
 };
 
@@ -47,7 +49,10 @@ const SISTEMA = `És um sommelier experiente. Recebes a fotografia de um rótulo
 
 Regras:
 - nome, produtor, ano, regiao e pais: o que está escrito no rótulo. "nome" é o nome do vinho sem o produtor (ex.: "Reserva Vinhas Velhas"). "regiao" é a denominação (ex.: "Douro DOC"). Se algum não estiver legível, usa o teu conhecimento deste vinho; só se não houver forma de saber, null.
-- PREENCHE SEMPRE castas, corpo, taninos, acidez, docura, aromas, harmonizacao, beberDe, beberAte e notas, mesmo sem certeza: usa o que sabes deste vinho e, na falta disso, o perfil típico do produtor, da região, das castas e do estilo.
+- castas: lista separada por vírgulas, com a percentagem quando a conheceres (ex.: "Touriga Nacional 40%, Touriga Franca 30%").
+- alcool: teor alcoólico em %. Usa o do rótulo; se não estiver visível, o típico deste vinho.
+- qualidadeColheita: qualidade daquele ano naquela região, de 1 (fraco) a 5 (excecional).
+- PREENCHE SEMPRE castas, alcool, qualidadeColheita, corpo, taninos, acidez, docura, aromas, harmonizacao, beberDe, beberAte e notas, mesmo sem certeza: usa o que sabes deste vinho e, na falta disso, o perfil típico do produtor, da região, das castas e do estilo.
 - corpo, taninos, acidez e docura: inteiros de 1 (muito baixo) a 5 (muito alto).
 - aromas: 3 a 6 descritores separados por vírgulas. harmonizacao: 3 a 5 pratos concretos, de preferência da cozinha portuguesa.
 - beberDe e beberAte: anos civis da janela de consumo ideal. Sem colheita (NV), conta a partir do ano atual.

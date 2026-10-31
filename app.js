@@ -259,7 +259,7 @@ function cartaoVinho(v, extra = '') {
     tipo.nome, v.regiao, v.castas, janela && 'Beber ' + janela, v.local && 'Local: ' + v.local
   ].filter(Boolean).map(esc).join(' · ');
   return `
-    <article class="vinho">
+    <article class="vinho clicavel" data-ficha="${v.id}">
       <div class="cor" style="background:${tipo.cor}"></div>
       <div class="corpo-vinho">
         ${v.foto ? `<img class="miniatura" alt="" data-foto="${esc(v.foto)}" src="${esc(srcFoto(v.foto))}">` : ''}
@@ -442,22 +442,25 @@ async function aplicarFoto(v) {
 
 /* ---------- Digitalização do rótulo ---------- */
 
-const CAMPOS_ROTULO = ['nome', 'produtor', 'ano', 'tipo', 'regiao', 'pais', 'castas', 'corpo', 'taninos',
-  'acidez', 'docura', 'aromas', 'harmonizacao', 'beberDe', 'beberAte', 'notas'];
+const CAMPOS_ROTULO = ['nome', 'produtor', 'ano', 'tipo', 'regiao', 'pais', 'castas', 'alcool', 'corpo', 'taninos',
+  'acidez', 'docura', 'qualidadeColheita', 'aromas', 'harmonizacao', 'beberDe', 'beberAte', 'notas'];
 
 const PROMPT_ROTULO = `És um sommelier experiente. A imagem é a fotografia de um rótulo de vinho.
 Responde APENAS com um objeto JSON com exatamente estas chaves:
 
 {"legivel": true, "nome": "", "produtor": "", "ano": 2018, "tipo": "tinto", "regiao": "", "pais": "",
- "castas": "", "corpo": 4, "taninos": 4, "acidez": 3, "docura": 1, "aromas": "", "harmonizacao": "",
+ "castas": "", "alcool": 14, "corpo": 4, "taninos": 4, "acidez": 3, "docura": 1, "qualidadeColheita": 4,
+ "aromas": "", "harmonizacao": "",
  "beberDe": 2022, "beberAte": 2032, "notas": ""}
 
 Regras:
 - nome, produtor, ano, regiao e pais: o que está escrito no rótulo. "nome" é o nome do vinho sem o produtor. Se algum não estiver legível, usa o teu conhecimento deste vinho; só se não houver forma de saber, null.
 - tipo: um de tinto, branco, rose, espumante, fortificado, sobremesa, outro.
 - PREENCHE SEMPRE todas as outras chaves, mesmo sem certeza: usa o que sabes deste vinho e, na falta disso, o perfil típico do produtor, da região, das castas e do estilo.
-- castas: lista separada por vírgulas.
+- castas: lista separada por vírgulas, com a percentagem quando a conheceres (ex.: "Touriga Nacional 40%, Touriga Franca 30%").
+- alcool: teor alcoólico em % (número). Usa o do rótulo; se não estiver visível, o típico deste vinho.
 - corpo, taninos, acidez, docura: inteiros de 1 (muito baixo) a 5 (muito alto).
+- qualidadeColheita: qualidade daquele ano naquela região, inteiro de 1 (fraco) a 5 (excecional).
 - aromas: 3 a 6 descritores separados por vírgulas.
 - harmonizacao: 3 a 5 pratos concretos, de preferência da cozinha portuguesa.
 - beberDe e beberAte: anos civis da janela de consumo ideal. Se não houver colheita (NV), conta a partir de ${ANO}.
@@ -495,7 +498,9 @@ function limparFicha(d) {
   const r = { ...d };
   const inteiro = v => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
   ['ano', 'beberDe', 'beberAte'].forEach(c => { r[c] = inteiro(r[c]); });
-  ['corpo', 'taninos', 'acidez', 'docura'].forEach(c => {
+  const dec = parseFloat(String(r.alcool ?? '').replace(',', '.').replace('%', ''));
+  r.alcool = Number.isFinite(dec) && dec > 0 && dec < 30 ? dec : null;
+  ['corpo', 'taninos', 'acidez', 'docura', 'qualidadeColheita'].forEach(c => {
     const n = inteiro(r[c]);
     r[c] = n === null ? null : Math.min(5, Math.max(1, n));
   });
@@ -542,6 +547,274 @@ async function digitalizar(ficheiro) {
   }
 }
 
+/* ---------- Ficha do vinho ---------- */
+
+const QUALIDADE = ['', 'Fraca', 'Razoável', 'Boa', 'Muito boa', 'Excecional'];
+let fichaAberta = null;
+
+const lista = t => String(t || '').split(/[,;\n]+/).map(x => x.trim()).filter(Boolean);
+const mesmoVinho = (a, b) => chaveDuplicado({ ...a, ano: 0 }) === chaveDuplicado({ ...b, ano: 0 });
+
+function faseMaturacao(v) {
+  const de = v.beberDe, ate = v.beberAte;
+  if (!de || !ate) return null;
+  const pico = de + Math.round((ate - de) * 0.4);
+  const inicio = Math.min(v.ano || de - 3, de - 1);
+  const fim = ate + Math.max(2, Math.round((ate - de) * 0.4));
+  let atual;
+  if (ANO < de) atual = 'Jovem';
+  else if (ANO < pico) atual = 'Em evolução';
+  else if (ANO <= ate) atual = 'No auge';
+  else atual = 'Em declínio';
+  return { de, ate, pico, inicio, fim, atual };
+}
+
+function dicaServico(v) {
+  const c = v.corpo || 3;
+  const idade = v.ano ? ANO - v.ano : null;
+  const temp = {
+    tinto: c >= 4 ? '16–18 °C' : c <= 2 ? '12–14 °C' : '14–16 °C',
+    branco: c >= 4 ? '10–12 °C' : '8–10 °C',
+    rose: '8–10 °C',
+    espumante: '6–8 °C',
+    fortificado: '14–16 °C',
+    sobremesa: '8–10 °C',
+    outro: '12–14 °C'
+  }[v.tipo || 'outro'];
+  let decantar = 'Dispensável';
+  if (v.tipo === 'tinto' || v.tipo === 'fortificado') {
+    if (idade !== null && idade >= 15) decantar = 'Só para separar o depósito. Servir logo';
+    else if (c >= 4 && (idade === null || idade <= 8)) decantar = 'Arejar 1 a 2 horas';
+    else if (c >= 3) decantar = 'Arejar 30 minutos';
+  } else if (v.tipo === 'branco' && c >= 4) {
+    decantar = 'Opcional, 15 a 30 minutos';
+  }
+  return { temp, decantar };
+}
+
+const EMOJI_PRATOS = [
+  [/cabrito|borrego|cordeiro|carneiro/, '🐑'], [/ca[cç]a|javali|veado|perdiz|lebre/, '🦌'],
+  [/vaca|bovin|bife|posta|novilho|picanha|carne vermelha|entrecosto|naco|vitela/, '🥩'],
+  [/porco|leit[aã]o|secretos|plumas|bochechas/, '🐖'], [/enchido|presunto|chouri[cç]o|charcutaria|alheira/, '🥓'],
+  [/frango|aves|pato|peru|galinha|codorniz/, '🍗'], [/bacalhau|peixe|polvo|robalo|dourada|salm[aã]o|atum|sardinha/, '🐟'],
+  [/marisco|camar[aã]o|am[eê]ijoa|ostra|lagosta|sapateira|santola/, '🦐'], [/queijo/, '🧀'],
+  [/massa|pizza|risot|lasanha/, '🍝'], [/cogumelo/, '🍄'], [/chocolate|sobremesa|bolo|doce|tarte|pudim/, '🍫'],
+  [/sushi|oriental|caril|picante|tailand/, '🍜'], [/salada|legume|vegetar/, '🥗'], [/fruto seco|noz|am[eê]ndoa/, '🥜']
+];
+function emojiPrato(nome) {
+  const n = nome.toLowerCase();
+  for (const [re, e] of EMOJI_PRATOS) if (re.test(n)) return e;
+  return '🍽️';
+}
+
+function compatibilidades(v) {
+  return PRATOS.map(p => ({ p, s: pontuarHarmonizacao(v, p) }))
+    .filter(x => x.s > 0)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, 4)
+    .map(x => ({ nome: x.p.nome, pct: Math.max(40, Math.min(98, Math.round(x.s / 11 * 100))) }));
+}
+
+function svgMaturacao(f) {
+  const W = 320, H = 150, X0 = 12, X1 = 308, YB = 108, YT = 18;
+  const ano2x = a => X0 + (a - f.inicio) / (f.fim - f.inicio) * (X1 - X0);
+  const c = (f.pico + f.ate) / 2;
+  const w = Math.max(1.5, (f.ate - f.de) * 0.55 + 1);
+  const curva = a => Math.exp(-(((a - c) / w) ** 2));
+  const ano2y = a => YB - curva(a) * (YB - YT);
+  const pts = [];
+  for (let i = 0; i <= 80; i++) {
+    const a = f.inicio + (f.fim - f.inicio) * i / 80;
+    pts.push(`${ano2x(a).toFixed(1)},${ano2y(a).toFixed(1)}`);
+  }
+  const hoje = Math.min(f.fim, Math.max(f.inicio, ANO));
+  const ptsHoje = pts.filter((_, i) => f.inicio + (f.fim - f.inicio) * i / 80 <= hoje);
+  const area = ptsHoje.length
+    ? `M${X0},${YB} L${ptsHoje.join(' L')} L${ano2x(hoje).toFixed(1)},${YB} Z` : '';
+  const fases = [
+    ['Jovem', f.inicio, f.de], ['Em evolução', f.de, f.pico], ['No auge', f.pico, f.ate + 1], ['Declínio', f.ate + 1, f.fim]
+  ];
+  const divisorias = [f.de, f.pico, f.ate + 1].map(a =>
+    `<line x1="${ano2x(a)}" y1="${YT - 6}" x2="${ano2x(a)}" y2="${YB}" class="mat-div"/>`).join('');
+  const rotulos = fases.map(([n, a, b]) => {
+    const x = ano2x((a + b) / 2);
+    const intervalo = b - 1 > a ? `${a}–${b - 1}` : `${a}`;
+    return `<text x="${x}" y="${YB + 16}" class="mat-fase${n === f.atual || (n === 'Declínio' && f.atual === 'Em declínio') ? ' atual' : ''}">${n}</text>
+            <text x="${x}" y="${YB + 29}" class="mat-anos">${intervalo}</text>`;
+  }).join('');
+  const hx = ano2x(hoje), hy = ano2y(hoje);
+  return `<svg viewBox="0 0 ${W} ${H}" class="grafico" role="img" aria-label="Fase de maturação: ${f.atual}">
+    ${divisorias}
+    ${area ? `<path d="${area}" class="mat-area"/>` : ''}
+    <polyline points="${pts.join(' ')}" class="mat-curva"/>
+    <line x1="${hx}" y1="${YT - 10}" x2="${hx}" y2="${YB}" class="mat-hoje"/>
+    <circle cx="${hx}" cy="${hy}" r="5" class="mat-ponto"/>
+    <text x="${Math.min(W - 20, Math.max(20, hx))}" y="${YT - 12}" class="mat-hoje-txt">Hoje</text>
+    ${rotulos}
+  </svg>`;
+}
+
+function svgBarras(pontos, formato) {
+  if (!pontos.length) return '';
+  const W = 320, H = 150, YB = 118, YT = 22;
+  const max = Math.max(...pontos.map(p => p.valor)) || 1;
+  const n = pontos.length;
+  const passo = (W - 20) / n;
+  const larg = Math.min(36, passo * 0.6);
+  return `<svg viewBox="0 0 ${W} ${H}" class="grafico" role="img">
+    <line x1="10" y1="${YB}" x2="${W - 10}" y2="${YB}" class="eixo"/>
+    ${pontos.map((p, i) => {
+      const h = Math.max(2, p.valor / max * (YB - YT));
+      const x = 10 + passo * i + (passo - larg) / 2;
+      return `<rect x="${x}" y="${YB - h}" width="${larg}" height="${h}" rx="4" class="barra${p.atual ? ' atual' : ''}"/>
+        <text x="${x + larg / 2}" y="${YB - h - 6}" class="barra-valor">${esc(formato(p.valor))}</text>
+        <text x="${x + larg / 2}" y="${YB + 16}" class="barra-rotulo">${esc(p.rotulo)}</text>`;
+    }).join('')}
+  </svg>`;
+}
+
+function barraSabor(esq, dir, val) {
+  const pct = val ? val / 5 * 100 : 0;
+  return `<div class="sabor">
+    <span class="sabor-esq">${esq}</span>
+    <div class="sabor-pista">${val ? `<div class="sabor-valor" style="width:${pct}%"></div>` : ''}</div>
+    <span class="sabor-dir">${dir}</span>
+  </div>`;
+}
+
+function seccao(titulo, corpo, extra = '') {
+  return `<section class="ficha-sec"><div class="ficha-sec-topo"><h3>${titulo}</h3>${extra}</div>${corpo}</section>`;
+}
+
+function renderFicha(v, aba) {
+  const tipo = TIPOS[v.tipo] || TIPOS.outro;
+  const fase = faseMaturacao(v);
+  const dica = dicaServico(v);
+  const colheitas = dados.vinhos.filter(x => mesmoVinho(x, v)).sort((a, b) => (a.ano || 0) - (b.ano || 0));
+  const notasAbertas = (v.historico || []).map(h => num(h.nota)).filter(n => n !== null);
+  const media = notasAbertas.length ? (notasAbertas.reduce((a, b) => a + b, 0) / notasAbertas.length).toFixed(1) : null;
+  const preco = valorUnitario(v);
+  const foto = srcFoto(v.foto);
+
+  const topo = `
+    <div class="ficha-topo" style="--tipo:${tipo.cor}">
+      ${foto
+        ? `<img class="ficha-foto" src="${esc(foto)}" data-foto="${esc(v.foto)}" alt="Rótulo de ${esc(v.nome)}">`
+        : `<svg class="ficha-garrafa" viewBox="0 0 60 180" aria-hidden="true"><path d="M24 4h12v40c0 8 14 14 14 34v94c0 3-2 4-4 4H14c-2 0-4-1-4-4V78c0-20 14-26 14-34z" fill="${tipo.cor}"/><rect x="14" y="96" width="32" height="40" rx="2" fill="#f4e9dc" opacity=".85"/></svg>`}
+    </div>
+    <div class="ficha-id">
+      <span class="ficha-tipo" style="background:${tipo.cor}">${tipo.nome}</span>
+      <h2>${esc(v.nome)} ${v.ano ? esc(v.ano) : 'NV'}</h2>
+      <p class="ficha-origem">${[v.regiao, v.pais].filter(Boolean).map(esc).join(', ')}</p>
+      ${v.produtor ? `<p class="ficha-produtor">${esc(v.produtor)}</p>` : ''}
+    </div>
+    <div class="ficha-abas" role="tablist">
+      <button data-aba="ficha" class="${aba === 'ficha' ? 'ativo' : ''}">Ficha</button>
+      <button data-aba="historico" class="${aba === 'historico' ? 'ativo' : ''}">Histórico (${(v.historico || []).length})</button>
+    </div>`;
+
+  if (aba === 'historico') {
+    const todos = colheitas.flatMap(x => (x.historico || []).map(h => ({ x, h })))
+      .sort((a, b) => (b.h.data || '').localeCompare(a.h.data || ''));
+    return topo + (todos.length ? `<div class="ficha-lista">${todos.map(({ x, h }) => `
+      <div class="ficha-evento">
+        <div class="ficha-evento-data">${esc(h.data)} · ${x.ano || 'NV'}${h.nota ? ` · ${esc(h.nota)}/5` : ''}</div>
+        <div>${[h.ocasiao, h.companhia && 'com ' + h.companhia, h.prato].filter(Boolean).map(esc).join(' · ') || 'Sem detalhes'}</div>
+        ${h.comentario ? `<div class="ajuda">${esc(h.comentario)}</div>` : ''}
+      </div>`).join('')}</div>`
+      : '<div class="vazio">Ainda nenhuma garrafa deste vinho foi aberta.</div>');
+  }
+
+  const chipsColheitas = `<div class="chips">${colheitas.map(x => `
+      <button class="chip-colheita${x.id === v.id ? ' ativo' : ''}" data-colheita="${x.id}">
+        ${x.ano || 'NV'} <small>×${x.quantidade}</small></button>`).join('')}</div>`;
+
+  const resumo = `<div class="ficha-grelha">
+      <div><strong class="fase-${fase ? fase.atual.replace(/\s/g, '-').toLowerCase() : 'sem'}">${fase ? fase.atual : ESTADOS[estado(v)]}</strong><span>Estado</span></div>
+      <div><strong>${v.beberDe || '?'} – ${v.beberAte || '?'}</strong><span>Janela de consumo</span></div>
+      <div><strong>${preco ? euros(preco) : '—'}</strong><span>Preço por garrafa</span></div>
+      <div><strong>${preco ? euros(preco * (v.quantidade || 0)) : '—'}</strong><span>Valor total (${v.quantidade} gf.)</span></div>
+    </div>`;
+
+  const avaliacao = `<div class="ficha-grelha">
+      <div><strong>${v.pontuacao ? esc(v.pontuacao) + ' / 5' : '— / 5'}</strong><span>A minha nota</span></div>
+      <div><strong>${media ? media + ' / 5' : '—'}</strong><span>${notasAbertas.length} prova${notasAbertas.length === 1 ? '' : 's'} registada${notasAbertas.length === 1 ? '' : 's'}</span></div>
+    </div>`;
+
+  const servico = `<div class="ficha-grelha">
+      <div><strong>🌡️ ${dica.temp}</strong><span>Temperatura</span></div>
+      <div><strong>🍷 ${esc(dica.decantar)}</strong><span>Decantação</span></div>
+    </div>
+    ${v.quantidade > 0 ? `<button class="btn primario largo" data-abrir="${v.id}">Abrir garrafa e registar prova</button>` : ''}`;
+
+  const etiquetas = lista(v.etiquetas);
+  const castas = lista(v.castas);
+  const pratos = lista(v.harmonizacao);
+  const compat = compatibilidades(v);
+  const q = v.qualidadeColheita;
+
+  const precos = [];
+  if (v.precoCompra) precos.push({ data: v.criadoEm || '', valor: v.precoCompra, rotulo: 'Compra' });
+  (v.precos || []).forEach(p => precos.push({ data: p.data, valor: p.valor, rotulo: (p.data || '').slice(2, 7).split('-').reverse().join('/') }));
+  const ultimosPrecos = precos.slice(-6);
+  if (ultimosPrecos.length) ultimosPrecos[ultimosPrecos.length - 1].atual = true;
+
+  return topo + `
+    ${seccao('As tuas colheitas', chipsColheitas)}
+    ${seccao('Resumo', resumo)}
+    ${seccao('Avaliação', avaliacao)}
+    ${seccao('Dica de serviço', servico)}
+    ${seccao('Etiquetas', etiquetas.length
+      ? `<div class="chips">${etiquetas.map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>`
+      : '<p class="ajuda">Sem etiquetas. Ex.: ocasião especial, oferta, para guardar.</p>', `<button class="link" data-editar="${v.id}">Editar</button>`)}
+    ${seccao('Localização', `<p>${v.local ? '📍 ' + esc(v.local) : '<span class="ajuda">Sem localização definida.</span>'}</p>`, `<button class="link" data-editar="${v.id}">Editar</button>`)}
+    ${seccao('Notas pessoais', v.notas ? `<p class="ficha-notas">${esc(v.notas)}</p>` : '<p class="ajuda">Sem notas.</p>', `<button class="link" data-editar="${v.id}">Editar</button>`)}
+    ${seccao('Qualidade da colheita', q ? `<div class="qualidade">${[1, 2, 3, 4, 5].map(i => `<span class="q q${i}${i === q ? ' ativo' : ''}"></span>`).join('')}</div>
+      <p class="qualidade-txt">${QUALIDADE[q]}</p>` : '<p class="ajuda">Não definida.</p>')}
+    ${seccao('Características de sabor', [
+      barraSabor('Leve', 'Encorpado', v.corpo),
+      barraSabor('Suave', 'Tânico', v.taninos),
+      barraSabor('Macio', 'Ácido', v.acidez),
+      barraSabor('Seco', 'Doce', v.docura)
+    ].join('') + (v.aromas ? `<p class="ficha-aromas"><strong>Aromas:</strong> ${esc(v.aromas)}</p>` : ''))}
+    ${seccao('Castas', castas.length ? `<div class="chips">${castas.map(c => `<span class="chip">🍇 ${esc(c)}</span>`).join('')}</div>` : '<p class="ajuda">Não definidas.</p>')}
+    ${seccao('Teor alcoólico', `<p class="ficha-grande">${v.alcool ? esc(String(v.alcool).replace('.', ',')) + ' %' : '—'}</p>`)}
+    ${seccao('Pratos sugeridos', (pratos.length ? `<div class="pratos-ficha">${pratos.map(p => `
+        <div class="prato-cartao"><span class="prato-emoji">${emojiPrato(p)}</span><span>${esc(p)}</span></div>`).join('')}</div>` : '')
+      + (compat.length ? `<div class="compat">${compat.map(c => `
+        <div class="compat-linha"><span>${esc(c.nome)}</span><div class="compat-pista"><div style="width:${c.pct}%"></div></div><strong>${c.pct}%</strong></div>`).join('')}</div>` : '')
+      || '<p class="ajuda">Sem sugestões. Preenche o tipo e o corpo.</p>')}
+    ${seccao('Fase de maturação', fase ? svgMaturacao(fase) : '<p class="ajuda">Define a janela de consumo para ver a curva.</p>')}
+    ${seccao('Preço da garrafa', ultimosPrecos.length
+      ? svgBarras(ultimosPrecos, x => x.toLocaleString('pt-PT', { maximumFractionDigits: 0 }) + '€')
+        + '<p class="ajuda">Atualiza o "valor atual" ao editar para acompanhar a evolução.</p>'
+      : '<p class="ajuda">Sem preços registados.</p>')}
+    ${seccao('Stock por colheita', svgBarras(colheitas.map(x => ({ valor: x.quantidade || 0, rotulo: String(x.ano || 'NV'), atual: x.id === v.id })), x => String(x)))}
+  `;
+}
+
+function abrirFicha(id, aba = 'ficha') {
+  const v = dados.vinhos.find(x => x.id === id);
+  if (!v) { fecharFicha(); return; }
+  fichaAberta = id;
+  $('#ficha-titulo').textContent = `${v.nome} ${v.ano || 'NV'}`;
+  const el = $('#ficha-conteudo');
+  const rolagem = el.dataset.id === id ? el.scrollTop : 0;
+  el.dataset.id = id;
+  el.innerHTML = renderFicha(v, aba);
+  el.scrollTop = rolagem;
+  $('#btn-ficha-editar').dataset.editar = id;
+  const dlg = $('#dlg-ficha');
+  if (!dlg.open) dlg.showModal();
+  hidratarFotos();
+}
+
+function fecharFicha() {
+  fichaAberta = null;
+  const dlg = $('#dlg-ficha');
+  if (dlg.open) dlg.close();
+}
+
 /* ---------- Formulário ---------- */
 
 function preencherSelects() {
@@ -550,9 +823,11 @@ function preencherSelects() {
   $('#f-tipo').innerHTML = '<option value="">Todos os tipos</option>' + opTipos;
   const opEscala = ESCALA.map((n, i) => `<option value="${i || ''}">${n || 'Não definido'}</option>`).join('');
   ['corpo', 'taninos', 'acidez', 'docura'].forEach(c => { $(`#form-vinho [name=${c}]`).innerHTML = opEscala; });
+  $('#form-vinho [name=qualidadeColheita]').innerHTML = QUALIDADE
+    .map((n, i) => `<option value="${i || ''}">${n || 'Não definida'}</option>`).join('');
 }
 
-const CAMPOS_NUM = ['ano', 'quantidade', 'formato', 'precoCompra', 'valorAtual', 'beberDe', 'beberAte', 'corpo', 'taninos', 'acidez', 'docura', 'pontuacao'];
+const CAMPOS_NUM = ['ano', 'quantidade', 'formato', 'precoCompra', 'valorAtual', 'beberDe', 'beberAte', 'corpo', 'taninos', 'acidez', 'docura', 'pontuacao', 'alcool', 'qualidadeColheita'];
 
 function lerForm(form) {
   const fd = new FormData(form);
@@ -593,6 +868,7 @@ async function guardarForm(e) {
   try {
     const existente = v.id && dados.vinhos.find(x => x.id === v.id);
     if (existente) {
+      registarPreco(existente, v.valorAtual);
       Object.assign(existente, v);
       await aplicarFoto(existente);
     } else {
@@ -601,7 +877,8 @@ async function guardarForm(e) {
         dup.quantidade += v.quantidade;
         if (!dup.foto) await aplicarFoto(dup);
       } else {
-        const novo = { ...v, id: novoId(), criadoEm: hojeISO(), historico: [] };
+        const novo = { ...v, id: novoId(), criadoEm: hojeISO(), historico: [], precos: [] };
+        registarPreco(novo, v.valorAtual);
         await aplicarFoto(novo);
         dados.vinhos.push(novo);
       }
@@ -612,6 +889,16 @@ async function guardarForm(e) {
   $('#dlg-vinho').close();
   guardar();
   aviso('Guardado.');
+  if (fichaAberta) abrirFicha(fichaAberta);
+}
+
+function registarPreco(v, valor) {
+  if (!valor) return;
+  v.precos = v.precos || [];
+  const ultimo = v.precos[v.precos.length - 1];
+  if (ultimo && ultimo.valor === valor) return;
+  if (ultimo && ultimo.data === hojeISO()) ultimo.valor = valor;
+  else v.precos.push({ data: hojeISO(), valor });
 }
 
 /* ---------- Abrir garrafa ---------- */
@@ -637,6 +924,7 @@ function registarAbertura(e) {
   (v.historico = v.historico || []).push(h);
   $('#dlg-abrir').close();
   guardar();
+  if (fichaAberta) abrirFicha(fichaAberta);
   aviso(v.quantidade ? `Registado. Restam ${v.quantidade}.` : 'Registado. Era a última garrafa.');
 }
 
@@ -750,8 +1038,8 @@ function importarCSV(texto) {
 
 function exportarCSV() {
   const campos = ['nome', 'produtor', 'ano', 'tipo', 'regiao', 'pais', 'castas', 'quantidade', 'formato', 'local',
-    'precoCompra', 'valorAtual', 'beberDe', 'beberAte', 'corpo', 'taninos', 'acidez', 'docura', 'pontuacao',
-    'aromas', 'harmonizacao', 'notas'];
+    'precoCompra', 'valorAtual', 'beberDe', 'beberAte', 'alcool', 'corpo', 'taninos', 'acidez', 'docura',
+    'qualidadeColheita', 'pontuacao', 'etiquetas', 'aromas', 'harmonizacao', 'notas'];
   const q = s => `"${String(s ?? '').replace(/"/g, '""')}"`;
   const csv = [campos.join(';')]
     .concat(dados.vinhos.map(v => campos.map(c => q(v[c])).join(';')))
@@ -836,11 +1124,20 @@ function ligarEventos() {
   $('#btn-remover-foto').addEventListener('click', () => { fotoPendente = 'remover'; mostrarPreview(''); });
 
   $('#form-abrir').addEventListener('submit', registarAbertura);
+  $('#btn-ficha-fechar').addEventListener('click', fecharFicha);
+  $('#dlg-ficha').addEventListener('close', () => { fichaAberta = null; });
+  $('#ficha-conteudo').addEventListener('click', e => {
+    const aba = e.target.closest('[data-aba]');
+    if (aba) { abrirFicha(fichaAberta, aba.dataset.aba); return; }
+    const col = e.target.closest('[data-colheita]');
+    if (col) abrirFicha(col.dataset.colheita);
+  });
   $('#btn-abrir-cancelar').addEventListener('click', () => $('#dlg-abrir').close());
 
   document.addEventListener('click', e => {
-    const t = e.target.closest('[data-editar],[data-abrir],[data-prato]');
+    const t = e.target.closest('[data-editar],[data-abrir],[data-prato],[data-ficha]');
     if (!t) return;
+    if (t.dataset.ficha && !e.target.closest('button')) { abrirFicha(t.dataset.ficha); return; }
     if (t.dataset.editar) abrirForm(t.dataset.editar);
     if (t.dataset.abrir) abrirGarrafa(t.dataset.abrir);
     if (t.dataset.prato) { pratoAtivo = pratoAtivo === t.dataset.prato ? null : t.dataset.prato; renderHarmonizar(); }

@@ -178,3 +178,99 @@ body.sem-sessao main, body.sem-sessao .separadores, body.sem-sessao #btn-novo { 
 .digitalizar { display: flex; flex-direction: column; gap: 4px; }
 .digitalizar .btn { text-align: center; }
 .btn.ocupado, .btn:disabled { opacity: .6; pointer-events: none; }
+
+/* Ficha do vinho */
+.vinho.clicavel { cursor: pointer; }
+.vinho.clicavel:hover { border-color: var(--vinho-claro); }
+dialog.ficha {
+  width: min(640px, 100vw); max-width: 100vw; height: min(100dvh, 920px); max-height: 100dvh;
+  padding: 0; display: none; flex-direction: column; overflow: hidden;
+}
+dialog.ficha[open] { display: flex; }
+@media (max-width: 640px) { dialog.ficha { border-radius: 0; } }
+.ficha-barra {
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+  border-bottom: 1px solid var(--linha); background: var(--superficie);
+}
+.ficha-barra #ficha-titulo { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn-icone { border: 0; background: none; color: var(--texto); font-size: 1.8rem; line-height: 1; padding: 0 8px; cursor: pointer; }
+.ficha-conteudo { overflow-y: auto; flex: 1; padding-bottom: 24px; }
+.ficha-topo {
+  display: flex; justify-content: center; align-items: flex-end; height: 230px; padding-top: 16px;
+  background: radial-gradient(ellipse at 50% 110%, color-mix(in srgb, var(--tipo) 35%, transparent), transparent 70%),
+              linear-gradient(180deg, color-mix(in srgb, var(--tipo) 18%, var(--fundo)), var(--fundo));
+}
+.ficha-foto { max-height: 210px; max-width: 70%; object-fit: contain; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+.ficha-garrafa { height: 200px; filter: drop-shadow(0 8px 12px rgba(0,0,0,.25)); }
+.ficha-id { text-align: center; padding: 12px 16px 4px; }
+.ficha-id h2 { margin: 8px 0 4px; font-size: 1.35rem; }
+.ficha-tipo { color: #fff; font-size: .75rem; padding: 2px 10px; border-radius: 999px; font-weight: 600; }
+.ficha-origem, .ficha-produtor { margin: 0; color: var(--suave); font-size: .9rem; }
+.ficha-abas { display: flex; gap: 8px; justify-content: center; padding: 12px 16px; }
+.ficha-abas button {
+  flex: 1; max-width: 200px; font: inherit; padding: 8px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--linha); background: var(--superficie); color: var(--texto);
+}
+.ficha-abas button.ativo { background: var(--vinho); border-color: var(--vinho); color: #fff; }
+.ficha-sec { margin: 10px 12px 0; padding: 14px; background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio); }
+.ficha-sec-topo { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.ficha-sec h3 { margin: 0; font-size: 1rem; }
+.ficha-sec p { margin: 0; }
+.link { border: 0; background: none; color: var(--vinho-claro); font: inherit; font-size: .9rem; cursor: pointer; padding: 0; }
+.ficha-grelha { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ficha-grelha > div { display: flex; flex-direction: column; gap: 2px; }
+.ficha-grelha strong { font-size: 1.02rem; }
+.ficha-grelha span { color: var(--suave); font-size: .8rem; }
+.fase-no-auge { color: var(--ok); }
+.fase-em-evolução { color: var(--ok); }
+.fase-jovem { color: var(--suave); }
+.fase-em-declínio { color: var(--perigo); }
+.btn.largo { width: 100%; margin-top: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { padding: 4px 10px; border-radius: 999px; background: var(--fundo); border: 1px solid var(--linha); font-size: .88rem; }
+.chip-colheita {
+  font: inherit; padding: 6px 12px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--linha); background: var(--fundo); color: var(--texto);
+}
+.chip-colheita.ativo { background: var(--vinho); color: #fff; border-color: var(--vinho); }
+.ficha-notas { white-space: pre-wrap; }
+.ficha-grande { font-size: 1.4rem; font-weight: 700; }
+.qualidade { display: flex; gap: 4px; }
+.qualidade .q { flex: 1; height: 8px; border-radius: 4px; opacity: .35; }
+.qualidade .q.ativo { opacity: 1; height: 12px; margin-top: -2px; }
+.q1 { background: #c0392b; } .q2 { background: #e67e22; } .q3 { background: #d4ac0d; } .q4 { background: #7cb342; } .q5 { background: #2e7d32; }
+.qualidade-txt { text-align: right; font-size: .85rem; color: var(--suave); margin-top: 4px !important; }
+.sabor { display: grid; grid-template-columns: 64px 1fr 72px; gap: 8px; align-items: center; margin: 8px 0; font-size: .85rem; }
+.sabor-esq { color: var(--suave); }
+.sabor-dir { font-weight: 600; text-align: right; }
+.sabor-pista { height: 8px; background: var(--fundo); border: 1px solid var(--linha); border-radius: 4px; overflow: hidden; }
+.sabor-valor { height: 100%; background: var(--vinho-claro); border-radius: 4px; }
+.ficha-aromas { margin-top: 8px !important; font-size: .9rem; }
+.pratos-ficha { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.prato-cartao {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; font-size: .82rem;
+  padding: 10px 6px; background: var(--fundo); border: 1px solid var(--linha); border-radius: 10px;
+}
+.prato-emoji { font-size: 2rem; line-height: 1; }
+.compat-linha { display: grid; grid-template-columns: 1fr 70px 38px; gap: 8px; align-items: center; font-size: .85rem; margin: 6px 0; }
+.compat-pista { height: 6px; background: var(--fundo); border-radius: 3px; overflow: hidden; }
+.compat-pista div { height: 100%; background: var(--ok); }
+.compat-linha strong { text-align: right; }
+.grafico { width: 100%; height: auto; display: block; }
+.grafico text { font-family: inherit; fill: var(--suave); font-size: 9px; text-anchor: middle; }
+.mat-curva { fill: none; stroke: var(--vinho-claro); stroke-width: 2.5; }
+.mat-area { fill: var(--vinho-claro); opacity: .18; }
+.mat-div { stroke: var(--linha); stroke-dasharray: 3 3; }
+.mat-hoje { stroke: var(--texto); stroke-width: 1; opacity: .5; }
+.mat-ponto { fill: var(--vinho); stroke: var(--superficie); stroke-width: 2; }
+.grafico .mat-hoje-txt { fill: var(--texto); font-weight: 600; }
+.grafico .mat-fase { font-size: 9.5px; }
+.grafico .mat-fase.atual { fill: var(--vinho-claro); font-weight: 700; }
+.grafico .mat-anos { font-size: 8px; }
+.eixo { stroke: var(--linha); }
+.barra { fill: var(--vinho-claro); opacity: .45; }
+.barra.atual { opacity: 1; }
+.grafico .barra-valor { fill: var(--texto); font-weight: 600; }
+.ficha-lista { display: flex; flex-direction: column; gap: 8px; margin: 0 12px; }
+.ficha-evento { padding: 12px; background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio); }
+.ficha-evento-data { font-weight: 600; margin-bottom: 2px; }

@@ -178,6 +178,7 @@
           </select></label>
         </div>
         <label>Localização<input name="local" placeholder="Garrafeira A, prateleira 3, posição 5"></label>
+        <label>Etiquetas<input name="etiquetas" placeholder="Ocasião especial, oferta, para guardar"></label>
         <div class="linha">
           <label>Preço de compra (€)<input name="precoCompra" type="number" min="0" step="0.01"></label>
           <label>Valor atual (€)<input name="valorAtual" type="number" min="0" step="0.01"></label>
@@ -198,6 +199,10 @@
           <label>Acidez<select name="acidez"></select></label>
           <label>Doçura<select name="docura"></select></label>
         </div>
+        <div class="linha">
+          <label>Teor alcoólico (%)<input name="alcool" type="number" min="0" max="30" step="0.1"></label>
+          <label>Qualidade da colheita<select name="qualidadeColheita"></select></label>
+        </div>
         <label>Pontuação (0 a 5)<input name="pontuacao" type="number" min="0" max="5" step="0.1"></label>
         <label>Aromas<input name="aromas" placeholder="Fruta preta, especiaria, couro"></label>
         <label>Harmonizações<input name="harmonizacao" placeholder="Cabrito assado, queijo da Serra"></label>
@@ -210,6 +215,16 @@
         <button type="submit" class="btn primario">Guardar</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- FICHA DO VINHO -->
+  <dialog id="dlg-ficha" class="ficha">
+    <div class="ficha-barra">
+      <button id="btn-ficha-fechar" class="btn-icone" aria-label="Voltar">‹</button>
+      <span id="ficha-titulo"></span>
+      <button id="btn-ficha-editar" class="btn pequeno">Editar</button>
+    </div>
+    <div id="ficha-conteudo" class="ficha-conteudo"></div>
   </dialog>
 
   <!-- ABRIR GARRAFA -->

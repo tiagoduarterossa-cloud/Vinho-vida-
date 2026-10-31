@@ -445,22 +445,80 @@ async function aplicarFoto(v) {
 const CAMPOS_ROTULO = ['nome', 'produtor', 'ano', 'tipo', 'regiao', 'pais', 'castas', 'corpo', 'taninos',
   'acidez', 'docura', 'aromas', 'harmonizacao', 'beberDe', 'beberAte', 'notas'];
 
+const PROMPT_ROTULO = `És um sommelier experiente. A imagem é a fotografia de um rótulo de vinho.
+Responde APENAS com um objeto JSON com exatamente estas chaves:
+
+{"legivel": true, "nome": "", "produtor": "", "ano": 2018, "tipo": "tinto", "regiao": "", "pais": "",
+ "castas": "", "corpo": 4, "taninos": 4, "acidez": 3, "docura": 1, "aromas": "", "harmonizacao": "",
+ "beberDe": 2022, "beberAte": 2032, "notas": ""}
+
+Regras:
+- nome, produtor, ano, regiao e pais: o que está escrito no rótulo. "nome" é o nome do vinho sem o produtor. Se algum não estiver legível, usa o teu conhecimento deste vinho; só se não houver forma de saber, null.
+- tipo: um de tinto, branco, rose, espumante, fortificado, sobremesa, outro.
+- PREENCHE SEMPRE todas as outras chaves, mesmo sem certeza: usa o que sabes deste vinho e, na falta disso, o perfil típico do produtor, da região, das castas e do estilo.
+- castas: lista separada por vírgulas.
+- corpo, taninos, acidez, docura: inteiros de 1 (muito baixo) a 5 (muito alto).
+- aromas: 3 a 6 descritores separados por vírgulas.
+- harmonizacao: 3 a 5 pratos concretos, de preferência da cozinha portuguesa.
+- beberDe e beberAte: anos civis da janela de consumo ideal. Se não houver colheita (NV), conta a partir de ${ANO}.
+- notas: 1 ou 2 frases sobre o vinho e o produtor.
+- legivel: false só se a imagem não mostrar um rótulo de vinho.
+- Escreve em português de Portugal.`;
+
+// Ordem: função na nuvem (se houver sessão), senão o Claude de quem está a ver a página (claude.ai).
+async function lerRotulo(f) {
+  if (NUVEM && utilizador) {
+    const { data, error } = await sb.functions.invoke('ler-rotulo', { body: { imagem: f.dataUrl.split(',')[1] } });
+    if (error) throw error;
+    if (!data || data.erro) throw new Error(data?.erro || 'sem resposta');
+    return data;
+  }
+  const sample = window.claude ? await window.claude.use('sample') : null;
+  if (!sample) return null;
+  const limites = await sample.limits().catch(() => null);
+  if (!limites || !limites.images) return null;
+  try {
+    return await sample.json(PROMPT_ROTULO, { images: [f.blob] });
+  } catch (e) {
+    const msg = {
+      not_granted: 'Não foi dada autorização para usar o Claude nesta página.',
+      rate_limited: 'Demasiados pedidos. Espera um pouco e tenta outra vez.',
+      image_rejected: 'A imagem não foi aceite. Tenta outra foto.',
+      invalid_json: 'A resposta veio mal formada. Tenta outra vez.',
+      refused: 'O pedido foi recusado. Tenta outra foto.'
+    }[e && e.code];
+    throw new Error(msg || (e && e.message) || 'erro desconhecido');
+  }
+}
+
+function limparFicha(d) {
+  const r = { ...d };
+  const inteiro = v => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
+  ['ano', 'beberDe', 'beberAte'].forEach(c => { r[c] = inteiro(r[c]); });
+  ['corpo', 'taninos', 'acidez', 'docura'].forEach(c => {
+    const n = inteiro(r[c]);
+    r[c] = n === null ? null : Math.min(5, Math.max(1, n));
+  });
+  if (r.tipo && !TIPOS[r.tipo]) r.tipo = normalizarTipo(r.tipo);
+  ['castas', 'aromas', 'harmonizacao'].forEach(c => { if (Array.isArray(r[c])) r[c] = r[c].join(', '); });
+  if (r.beberDe && r.beberAte && r.beberDe > r.beberAte) [r.beberDe, r.beberAte] = [r.beberAte, r.beberDe];
+  return r;
+}
+
 async function digitalizar(ficheiro) {
   const btn = $('#btn-digitalizar');
-  if (!NUVEM || !utilizador) {
-    await escolherFoto(ficheiro);
-    aviso('Foto guardada. A leitura automática do rótulo precisa de sessão iniciada.');
-    return;
-  }
   btn.classList.add('ocupado');
   btn.querySelector('span').textContent = 'A ler o rótulo...';
   try {
     const f = await escolherFoto(ficheiro);
-    const { data, error } = await sb.functions.invoke('ler-rotulo', {
-      body: { imagem: f.dataUrl.split(',')[1] }
-    });
-    if (error) throw error;
-    if (!data || data.erro) throw new Error(data?.erro || 'sem resposta');
+    // Para a leitura usa-se sempre uma imagem com boa resolução, mesmo em modo local.
+    const leitura = NUVEM ? f : await redimensionar(ficheiro, 1568, 0.85);
+    const bruto = await lerRotulo(leitura);
+    if (!bruto) {
+      aviso('Foto guardada. A leitura automática não está disponível aqui: abre a app pelo link do claude.ai ou inicia sessão.');
+      return;
+    }
+    const data = limparFicha(bruto);
     if (data.legivel === false) { aviso('Não consegui ler o rótulo. Tenta com mais luz e de frente.'); return; }
     const form = $('#form-vinho');
     let n = 0;
@@ -470,7 +528,11 @@ async function digitalizar(ficheiro) {
       form.elements[c].value = val;
       n++;
     });
-    aviso(`${n} campos preenchidos. Confirma tudo antes de guardar.`);
+    if (!form.elements.beberDe.value && form.elements.ano.value) {
+      const s = sugerirJanela(lerForm(form));
+      if (s) { form.elements.beberDe.value = s.de; form.elements.beberAte.value = s.ate; n += 2; }
+    }
+    aviso(`${n} de ${CAMPOS_ROTULO.length} campos preenchidos. Confirma tudo antes de guardar.`);
   } catch (e) {
     console.error(e);
     aviso('Falhou a leitura do rótulo: ' + (e.message || e));
